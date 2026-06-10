@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>Online Complaint Registration Portal | File & Track Complaints</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    .toast-notification {
+      position: fixed; bottom: 20px; right: 20px; z-index: 1000;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .required-field::after {
+      content: " *";
+      color: red;
+      font-weight: bold;
+    }
+    .image-preview {
+      max-width: 150px;
+      max-height: 150px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      padding: 5px;
+    }
+    .nav-link {
+      transition: all 0.3s ease;
+    }
+    .nav-link:hover {
+      background-color: rgba(255,255,255,0.2);
+      transform: translateY(-2px);
+    }
+    .footer-link {
+      transition: color 0.3s ease;
+    }
+    .footer-link:hover {
+      color: #22c55e;
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <div id="app"></div>
+
+  <script>
+    (function(){
+      // ==================== SHARED STORAGE KEYS ====================
+      const USERS_KEY = 'unified_grievance_users';
+      const COMPLAINTS_KEY = 'unified_grievance_complaints';
+      const SESSION_KEY = 'unified_grievance_session';
+
+      // ==================== DEFAULT DATA ====================
+      function getDefaultUsers() {
+        return [
+          { id: 'admin_001', fullName: "System Administrator", email: "admin@gov.in", password: "admin123", role: "admin", phone: "1800111222", department: "Admin Cell" },
+          { id: 'User_demo', fullName: "Rajesh Sharma", email: "User@example.com", password: "user123", role: "User", phone: "9876543210", aadhaar: "1234-5678-9012", address: "Mumbai, Maharashtra" }
+        ];
+      }
+
+      function getDefaultComplaints() {
+        return [];
+      }
+
+      // Storage helpers
+      function getUsers() {
+        let users = localStorage.getItem(USERS_KEY);
+        if(!users) { localStorage.setItem(USERS_KEY, JSON.stringify(getDefaultUsers())); return getDefaultUsers(); }
+        return JSON.parse(users);
+      }
+      function saveUsers(users) { localStorage.setItem(USERS_KEY, JSON.stringify(users)); }
+
+      function getComplaints() {
+        let comps = localStorage.getItem(COMPLAINTS_KEY);
+        if(!comps) { localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(getDefaultComplaints())); return getDefaultComplaints(); }
+        return JSON.parse(comps);
+      }
+      function saveComplaints(complaints) { localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(complaints)); }
+
+      // Session management
+      let currentUser = null;
+      let currentPortal = 'User';
+      let currentPage = 'dashboard';
+
+      function setSession(user, portal) {
+        currentUser = user;
+        currentPortal = portal;
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ user, portal }));
+      }
+      function getSession() {
+        const session = localStorage.getItem(SESSION_KEY);
+        if(session) {
+          try {
+            const parsed = JSON.parse(session);
+            currentUser = parsed.user;
+            currentPortal = parsed.portal;
+            return { user: parsed.user, portal: parsed.portal };
+          } catch(e) {}
+        }
+        return null;
+      }
+      function clearSession() {
+        currentUser = null;
+        localStorage.removeItem(SESSION_KEY);
+      }
+
+      function showToast(message, type = 'success') {
+        const toastDiv = document.createElement('div');
+        toastDiv.className = `toast-notification px-5 py-3 rounded-lg shadow-lg text-white ${type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`;
+        toastDiv.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} mr-2"></i>${message}`;
+        document.body.appendChild(toastDiv);
+        setTimeout(() => toastDiv.remove(), 3000);
+      }
+
+      // Complaint types configuration
+      const complaintTypes = {
+        bike_lost: {
+          name: "🚲 Bike / Motorcycle Lost/Theft",
+          fields: [
+            { name: "bikeRegNumber", label: "Bike Registration Number (RC Number)", type: "text", placeholder: "MH-02-AB-1234", required: true, icon: "fa-id-card" },
+            { name: "bikeModel", label: "Bike Model & Company", type: "text", placeholder: "Honda Activa 6G / Bajaj Pulsar", required: true, icon: "fa-motorcycle" },
+            { name: "bikeColor", label: "Bike Color", type: "text", placeholder: "Black / Red / Blue", required: true, icon: "fa-palette" },
+            { name: "bikeImage", label: "Upload Bike Photo", type: "file", accept: "image/*", required: false, icon: "fa-image", isImage: true },
+            { name: "lostTime", label: "Date & Time of Incident", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "lostPlace", label: "Place of Incident", type: "text", placeholder: "Near Andheri Metro Station", required: true, icon: "fa-map-marker-alt" },
+            { name: "lostDescription", label: "Detailed Description", type: "textarea", placeholder: "Describe how the bike was stolen...", required: true, icon: "fa-file-alt" },
+            { name: "policeFir", label: "Police FIR Number", type: "text", placeholder: "FIR No. 123/2024", required: false, icon: "fa-file-signature" }
+          ]
+        },
+        phone_lost: {
+          name: "📱 Mobile Phone Lost/Theft",
+          fields: [
+            { name: "phoneModel", label: "Mobile Phone Model", type: "text", placeholder: "iPhone 14 Pro / Samsung S23", required: true, icon: "fa-mobile-alt" },
+            { name: "phoneImei", label: "IMEI Number", type: "text", placeholder: "IMEI1: 123456789012345", required: true, icon: "fa-barcode" },
+            { name: "phoneNumber", label: "Phone Number (SIM)", type: "tel", placeholder: "9876543210", required: true, icon: "fa-phone" },
+            { name: "phoneImage", label: "Upload Phone Photo", type: "file", accept: "image/*", required: false, icon: "fa-image", isImage: true },
+            { name: "lostTime", label: "Date & Time of Loss", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "lostPlace", label: "Place of Incident", type: "text", placeholder: "Local train, Andheri Station", required: true, icon: "fa-map-marker-alt" },
+            { name: "lostDescription", label: "Detailed Description", type: "textarea", placeholder: "Describe how the phone was lost...", required: true, icon: "fa-file-alt" },
+            { name: "trackingEnabled", label: "Find My Device Enabled?", type: "select", options: ["Yes", "No", "Not Sure"], required: true, icon: "fa-location-dot" }
+          ]
+        },
+        wallet_lost: {
+          name: "💰 Wallet / Purse Lost",
+          fields: [
+            { name: "walletType", label: "Wallet Type", type: "text", placeholder: "Leather Wallet / Purse", required: true, icon: "fa-wallet" },
+            { name: "walletColor", label: "Wallet Color", type: "text", placeholder: "Brown / Black / Red", required: true, icon: "fa-palette" },
+            { name: "cashAmount", label: "Cash Amount (approx)", type: "number", placeholder: "Amount in INR", required: false, icon: "fa-rupee-sign" },
+            { name: "cardsIncluded", label: "Cards Included", type: "text", placeholder: "Debit Card, Credit Card, Aadhaar Card", required: true, icon: "fa-credit-card" },
+            { name: "lostTime", label: "Date & Time of Loss", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "lostPlace", label: "Place of Incident", type: "text", placeholder: "Shopping mall, Bus stop", required: true, icon: "fa-map-marker-alt" },
+            { name: "lostDescription", label: "Detailed Description", type: "textarea", placeholder: "Describe how the wallet was lost...", required: true, icon: "fa-file-alt" }
+          ]
+        },
+        document_lost: {
+          name: "📄 Important Documents Lost",
+          fields: [
+            { name: "documentType", label: "Type of Document", type: "select", options: ["Aadhaar Card", "PAN Card", "Driving License", "Passport", "Voter ID", "Educational Certificate", "Other"], required: true, icon: "fa-file-alt" },
+            { name: "documentNumber", label: "Document Number", type: "text", placeholder: "Document number if available", required: false, icon: "fa-hashtag" },
+            { name: "documentImage", label: "Upload Document Copy", type: "file", accept: "image/*", required: false, icon: "fa-image", isImage: true },
+            { name: "lostTime", label: "Date & Time of Loss", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "lostPlace", label: "Place of Incident", type: "text", placeholder: "Government office, Traveling", required: true, icon: "fa-map-marker-alt" },
+            { name: "lostDescription", label: "Detailed Description", type: "textarea", placeholder: "Describe how the document was lost...", required: true, icon: "fa-file-alt" }
+          ]
+        },
+        cyber_fraud: {
+          name: "💻 Cyber Fraud / Online Scam",
+          fields: [
+            { name: "fraudType", label: "Type of Fraud", type: "select", options: ["UPI Fraud", "Credit/Debit Card Fraud", "Phishing Email/SMS", "Online Shopping Fraud", "Job Scam", "Loan Scam", "KYC Fraud", "Other"], required: true, icon: "fa-shield-haltered" },
+            { name: "fraudAmount", label: "Amount Lost", type: "number", placeholder: "Amount in INR", required: false, icon: "fa-rupee-sign" },
+            { name: "transactionId", label: "Transaction ID", type: "text", placeholder: "Transaction reference number", required: false, icon: "fa-receipt" },
+            { name: "fraudNumber", label: "Fraudster's Contact", type: "text", placeholder: "Phone/Email used by scammer", required: false, icon: "fa-phone-alt" },
+            { name: "fraudScreenshot", label: "Upload Screenshot", type: "file", accept: "image/*", required: false, icon: "fa-image", isImage: true },
+            { name: "fraudDate", label: "Date of Incident", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "fraudDescription", label: "Detailed Description", type: "textarea", placeholder: "Explain how the fraud happened...", required: true, icon: "fa-file-alt" }
+          ]
+        },
+        other: {
+          name: "📌 Other Complaint",
+          fields: [
+            { name: "otherSubject", label: "Subject of Complaint", type: "text", placeholder: "Brief subject line", required: true, icon: "fa-heading" },
+            { name: "incidentDate", label: "Date of Incident", type: "datetime-local", required: true, icon: "fa-calendar-alt" },
+            { name: "incidentPlace", label: "Place of Incident", type: "text", placeholder: "Location where incident occurred", required: true, icon: "fa-map-marker-alt" },
+            { name: "incidentDescription", label: "Detailed Description", type: "textarea", placeholder: "Describe your complaint in detail...", required: true, icon: "fa-file-alt" },
+            { name: "supportingDoc", label: "Supporting Document", type: "file", accept: "image/*,.pdf", required: false, icon: "fa-paperclip", isImage: true }
+          ]
+        }
+      };
+
+      const complaintTypeNames = {
+        bike_lost: "🚲 Bike Lost/Theft",
+        phone_lost: "📱 Phone Lost/Theft",
+        wallet_lost: "💰 Wallet Lost",
+        document_lost: "📄 Documents Lost",
+        cyber_fraud: "💻 Cyber Fraud",
+        other: "📌 Other Complaint"
+      };
+
+      function generateComplaintId() {
+        const all = getComplaints();
+        const numbers = all.map(c => parseInt(c.id.replace('CMP',''))).filter(n => !isNaN(n));
+        const maxNum = numbers.length > 0 ? Math.max(...numbers) : 1000;
+        return `CMP${maxNum + 1}`;
+      }
+
+      function addComplaint(complaint) {
+        let all = getComplaints();
+        all.unshift(complaint);
+        saveComplaints(all);
+        return complaint;
+      }
+
+      function updateComplaint(complaintId, updates) {
+        let all = getComplaints();
+        const index = all.findIndex(c => c.id === complaintId);
+        if(index !== -1) {
+          all[index] = { ...all[index], ...updates, updatedAt: new Date().toISOString() };
+          saveComplaints(all);
+          return true;
+        }
+        return false;
+      }
+
+      function imageToBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = error => reject(error);
+        });
+      }
+
+      const root = document.getElementById('app');
+
+      // ==================== NAVIGATION FUNCTION ====================
+      function navigateTo(page) {
+        currentPage = page;
+        // Re-render the User dashboard with the new page
+        renderUserDashboard();
+      }
+
+      // ==================== NAVIGATION COMPONENT ====================
+      function renderNavbar() {
+        return `
+          <div class="bg-green-800 text-white shadow-lg sticky top-0 z-10">
+            <div class="max-w-7xl mx-auto px-4">
+              <div class="flex flex-wrap justify-between items-center py-3">
+                <div class="flex items-center gap-2 cursor-pointer" data-nav="dashboard">
+                  <i class="fas fa-hand-fist text-2xl text-green-300"></i>
+                  <span class="font-bold text-xl">User Portal</span>
+                </div>
+                <div class="flex flex-wrap gap-1 mt-2 sm:mt-0">
+                  <button data-nav="dashboard" class="nav-link px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"><i class="fas fa-home mr-1"></i>Home</button>
+                  <button data-nav="register" class="nav-link px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"><i class="fas fa-file-alt mr-1"></i>Complaint</button>
+                  <button data-nav="faq" class="nav-link px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"><i class="fas fa-question-circle mr-1"></i>FAQs</button>
+                  <button data-nav="about" class="nav-link px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"><i class="fas fa-info-circle mr-1"></i>About Us</button>
+                  <button data-nav="contact" class="nav-link px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"><i class="fas fa-envelope mr-1"></i>Contact</button>
+                </div>
+                <div class="flex items-center gap-3 mt-2 sm:mt-0">
+                  <span class="text-sm"><i class="fas fa-user-circle mr-1"></i>${currentUser?.fullName || 'Guest'}</span>
+                  <button id="logoutNavBtn" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded-lg text-sm transition"><i class="fas fa-sign-out-alt mr-1"></i>Logout</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderFooter() {
+        return `
+          <footer class="bg-gray-900 text-white mt-12">
+            <div class="max-w-7xl mx-auto px-4 py-8">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                  <h3 class="text-xl font-bold mb-3"><i class="fas fa-hand-fist text-green-400 mr-2"></i>User Portal</h3>
+                  <p class="text-gray-400 text-sm">Empowering Users to file complaints and get quick resolution from authorities.</p>
+                  <div class="flex gap-4 mt-4">
+                    <a href="#" class="footer-link text-gray-400 hover:text-green-400"><i class="fab fa-facebook-f"></i></a>
+                    <a href="#" class="footer-link text-gray-400 hover:text-green-400"><i class="fab fa-twitter"></i></a>
+                    <a href="#" class="footer-link text-gray-400 hover:text-green-400"><i class="fab fa-instagram"></i></a>
+                    <a href="#" class="footer-link text-gray-400 hover:text-green-400"><i class="fab fa-linkedin-in"></i></a>
+                  </div>
+                </div>
+                <div>
+                  <h4 class="font-semibold mb-3">Quick Links</h4>
+                  <ul class="space-y-2 text-sm">
+                    <li><button data-nav="dashboard" class="footer-link text-gray-400 hover:text-green-400">Home</button></li>
+                    <li><button data-nav="register" class="footer-link text-gray-400 hover:text-green-400">Register Complaint</button></li>
+                    <li><button data-nav="faq" class="footer-link text-gray-400 hover:text-green-400">FAQs</button></li>
+                    <li><button data-nav="about" class="footer-link text-gray-400 hover:text-green-400">About Us</button></li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 class="font-semibold mb-3">Contact Info</h4>
+                  <ul class="space-y-2 text-sm text-gray-400">
+                    <li><i class="fas fa-phone mr-2 text-green-400"></i> +91-1800-111-222</li>
+                    <li><i class="fas fa-envelope mr-2 text-green-400"></i> support@user.gov.in</li>
+                    <li><i class="fas fa-map-marker-alt mr-2 text-green-400"></i> New Delhi, India - 110001</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 class="font-semibold mb-3">Working Hours</h4>
+                  <ul class="space-y-2 text-sm text-gray-400">
+                    <li><i class="far fa-clock mr-2 text-green-400"></i> Mon-Sun:24 X 7</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="border-t border-gray-800 mt-6 pt-4 text-center text-gray-500 text-sm">
+                <p>&copy; 2024 User Portal. All rights reserved. | Developed by Government of India</p>
+              </div>
+            </div>
+          </footer>
+        `;
+      }
+
+      // ==================== PAGE CONTENT RENDERERS ====================
+      
+      function renderDashboardContent() {
+        const complaints = getComplaints();
+        const myComplaints = complaints.filter(c => c.UserId === currentUser.id);
+        const counts = {
+          pending: myComplaints.filter(c => c.status === 'pending').length,
+          investigating: myComplaints.filter(c => c.status === 'investigating').length,
+          resolved: myComplaints.filter(c => c.status === 'resolved').length
+        };
+        
+        return `
+          <div class="max-w-7xl mx-auto px-4 py-6">
+            <div class="grid grid-cols-3 gap-4 mb-6">
+              <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-yellow-600">${counts.pending}</div><div>Pending</div></div>
+              <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-orange-600">${counts.investigating}</div><div>Investigating</div></div>
+              <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-green-600">${counts.resolved}</div><div>Resolved</div></div>
+            </div>
+            
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-3">
+              <h2 class="text-xl font-bold">My Complaints (${myComplaints.length})</h2>
+              <button id="newComplaintBtn" class="bg-green-700 hover:bg-green-800 text-white px-5 py-2 rounded-lg transition"><i class="fas fa-plus mr-2"></i>File New Complaint</button>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="min-w-full">
+                  <thead class="bg-gray-100">
+                    <tr><th class="px-4 py-3">ID</th><th>Type</th><th>Title</th><th>Status</th><th>Admin Response</th><th>Filed On</th><th>Action</th></tr>
+                  </thead>
+                  <tbody>
+                    ${myComplaints.map(comp => `
+                      <tr class="border-b hover:bg-gray-50">
+                        <td class="px-4 py-3 font-mono text-sm">${comp.id}</td>
+                        <td class="px-4 py-3 text-sm">${complaintTypeNames[comp.complaintType]}</td>
+                        <td class="px-4 py-3">${comp.title?.substring(0, 35) || 'N/A'}</td>
+                        <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${comp.status === 'resolved' ? 'bg-green-100 text-green-700' : comp.status === 'investigating' ? 'bg-orange-100 text-orange-700' : 'bg-yellow-100 text-yellow-700'}">${comp.status}</span></td>
+                        <td class="px-4 py-3 text-sm max-w-xs truncate">${comp.adminRemarks ? comp.adminRemarks.substring(0, 30) : 'Waiting...'}</td>
+                        <td class="px-4 py-3 text-xs">${new Date(comp.createdAt).toLocaleDateString()}</td>
+                        <td class="px-4 py-3"><button data-id="${comp.id}" class="viewBtn text-blue-600 underline text-sm hover:text-blue-800">View</button></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+              ${myComplaints.length === 0 ? '<div class="text-center py-10 text-gray-400">No complaints filed yet.</div>' : ''}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderFAQsContent() {
+        const faqs = [
+          { q: "How do I file a complaint?", a: "Login to your account, click on 'Complaint' button, select your complaint type, fill in all required details, and submit. You will receive a unique Complaint ID for tracking." },
+          { q: "How can I track my complaint status?", a: "After logging in, go to your Dashboard (Home page). All your complaints are listed with their current status: Pending, Investigating, or Resolved." },
+          { q: "How long does it take to resolve a complaint?", a: "Resolution time varies by complaint type. Simple issues may be resolved in 3-5 days, while complex cases like cyber fraud may take 15-30 days." },
+          { q: "Can I upload images with my complaint?", a: "Yes, you can upload images such as bike photos, phone photos, screenshots, or document copies when filing a complaint." },
+          { q: "What if I forget my password?", a: "Please contact our support team at support@user.gov.in for password reset assistance." },
+          { q: "Is my personal information secure?", a: "Yes, all your personal data is encrypted and stored securely. Only authorized government officials have access." },
+          { q: "Can I edit my complaint after submission?", a: "Once submitted, you cannot edit the complaint. However, you can add additional information through the admin response." },
+          { q: "Will I be notified when my complaint is updated?", a: "Yes, you will see the admin response and status update on your dashboard immediately." }
+        ];
+        
+        return `
+          <div class="max-w-4xl mx-auto px-4 py-8">
+            <div class="text-center mb-10">
+              <h1 class="text-3xl font-bold text-gray-800">Frequently Asked Questions</h1>
+              <p class="text-gray-600 mt-2">Find answers to common questions about our grievance system</p>
+              <div class="w-24 h-1 bg-green-600 mx-auto mt-4 rounded-full"></div>
+            </div>
+            <div class="space-y-4">
+              ${faqs.map((faq, index) => `
+                <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                  <button class="faq-btn w-full text-left px-6 py-4 font-semibold text-gray-800 hover:bg-gray-50 transition flex justify-between items-center">
+                    <span><i class="fas fa-question-circle text-green-600 mr-3"></i>${faq.q}</span>
+                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                  </button>
+                  <div class="faq-answer px-6 pb-4 hidden">
+                    <p class="text-gray-600 pl-7 border-t pt-3">${faq.a}</p>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="mt-8 bg-green-50 rounded-xl p-6 text-center">
+              <i class="fas fa-headset text-2xl text-green-600 mb-2"></i>
+              <h3 class="font-bold">Still have questions?</h3>
+              <p class="text-sm text-gray-600">Contact our support team: support@user.gov.in | 1800-111-222</p>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderAboutUsContent() {
+        return `
+          <div class="max-w-4xl mx-auto px-4 py-8">
+            <div class="text-center mb-10">
+              <h1 class="text-3xl font-bold text-gray-800">About Us</h1>
+              <p class="text-gray-600 mt-2">Your voice matters - We're here to help</p>
+              <div class="w-24 h-1 bg-green-600 mx-auto mt-4 rounded-full"></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-lg p-8 space-y-6">
+              <div>
+                <h2 class="text-2xl font-bold text-green-700 mb-3"><i class="fas fa-bullhorn mr-2"></i>Our Mission</h2>
+                <p class="text-gray-700 leading-relaxed">To provide a transparent, efficient, and user-friendly platform for Users to register complaints and track their resolution status in real-time. We strive to bridge the gap between Users and government authorities.</p>
+              </div>
+              <div>
+                <h2 class="text-2xl font-bold text-green-700 mb-3"><i class="fas fa-eye mr-2"></i>Our Vision</h2>
+                <p class="text-gray-700 leading-relaxed">Creating a corruption-free, accountable governance system where every User's grievance is heard and addressed promptly with complete transparency.</p>
+              </div>
+              <div class="grid md:grid-cols-3 gap-6 pt-4">
+                <div class="text-center p-4 bg-green-50 rounded-lg">
+                  <i class="fas fa-users text-3xl text-green-600 mb-2"></i>
+                  <p class="font-semibold">1M+ Users Served</p>
+                </div>
+                <div class="text-center p-4 bg-green-50 rounded-lg">
+                  <i class="fas fa-check-circle text-3xl text-green-600 mb-2"></i>
+                  <p class="font-semibold">95% Resolution Rate</p>
+                </div>
+                <div class="text-center p-4 bg-green-50 rounded-lg">
+                  <i class="fas fa-clock text-3xl text-green-600 mb-2"></i>
+                  <p class="font-semibold">48hr Avg Response</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderContactUsContent() {
+        return `
+          <div class="max-w-5xl mx-auto px-4 py-8">
+            <div class="text-center mb-10">
+              <h1 class="text-3xl font-bold text-gray-800">Contact Us</h1>
+              <p class="text-gray-600 mt-2">We're here to help - Reach out to us anytime</p>
+              <div class="w-24 h-1 bg-green-600 mx-auto mt-4 rounded-full"></div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-8">
+              <div class="space-y-6">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                  <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-map-marker-alt text-green-600 mr-2"></i>Visit Us</h2>
+                  <p class="text-gray-600">Online Complain Registration System<br>Ministry of Home Affairs<br>North Block, New Delhi - 110001</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                  <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-phone-alt text-green-600 mr-2"></i>Call Us</h2>
+                  <p class="text-gray-600"><strong>Toll-Free:</strong> 1800-111-2222 (24x7)</p>
+                  <p class="text-gray-600 mt-2"><strong>Phone:</strong> +91-11-23456789 (24 X 7)</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                  <h2 class="text-xl font-bold text-gray-800 mb-4"><i class="fas fa-envelope text-green-600 mr-2"></i>Email Us</h2>
+                  <p class="text-gray-600"><strong>Support:</strong> support@user.gov.in</p>
+                  <p class="text-gray-600 mt-2"><strong>Complaints:</strong> complaints@user.gov.in</p>
+                </div>
+              </div>
+              <div class="bg-white rounded-xl shadow-lg p-6">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Send us a Message</h2>
+                <form id="contactForm">
+                  <div class="mb-4"><input type="text" placeholder="Your Name" class="w-full border rounded-lg p-3" required></div>
+                  <div class="mb-4"><input type="email" placeholder="Your Email" class="w-full border rounded-lg p-3" required></div>
+                  <div class="mb-4"><input type="text" placeholder="Subject" class="w-full border rounded-lg p-3" required></div>
+                  <div class="mb-4"><textarea rows="4" placeholder="Your Message" class="w-full border rounded-lg p-3" required></textarea></div>
+                  <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold transition">Send Message</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // ==================== COMPLAINT FORM PAGES ====================
+      function renderComplaintTypeSelection() {
+        const html = `
+          <div class="min-h-screen bg-gray-50 flex flex-col">
+            ${renderNavbar()}
+            <div class="flex-grow max-w-4xl mx-auto px-4 py-8">
+              <button id="backBtn" class="mb-4 text-green-700 hover:underline"><i class="fas fa-arrow-left"></i> Back to Dashboard</button>
+              <div class="bg-white rounded-xl shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-center mb-6">Select Complaint Type</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  ${Object.entries(complaintTypes).map(([key, type]) => `
+                    <button data-type="${key}" class="complaintTypeBtn bg-white border-2 border-gray-200 hover:border-green-500 hover:bg-green-50 p-5 rounded-xl text-left transition-all">
+                      <div class="text-3xl mb-2">${type.name.split(' ')[0]}</div>
+                      <div class="font-semibold">${type.name}</div>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+            ${renderFooter()}
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        // Attach event listeners for this page
+        attachComplaintTypeSelectionEvents();
+      }
+
+      function renderComplaintForm(complaintType) {
+        const typeConfig = complaintTypes[complaintType];
+        let fieldsHtml = '';
+        typeConfig.fields.forEach(field => {
+          if(field.type === 'textarea') {
+            fieldsHtml += `<div class="mb-4"><label class="block font-semibold mb-2 ${field.required ? 'required-field' : ''}"><i class="fas ${field.icon} mr-2 text-green-600"></i>${field.label}</label><textarea id="${field.name}" rows="4" class="w-full border rounded-lg p-3" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}></textarea></div>`;
+          } else if(field.type === 'select') {
+            fieldsHtml += `<div class="mb-4"><label class="block font-semibold mb-2 ${field.required ? 'required-field' : ''}"><i class="fas ${field.icon} mr-2 text-green-600"></i>${field.label}</label><select id="${field.name}" class="w-full border rounded-lg p-3" ${field.required ? 'required' : ''}>${field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}</select></div>`;
+          } else if(field.type === 'file') {
+            fieldsHtml += `<div class="mb-4"><label class="block font-semibold mb-2"><i class="fas ${field.icon} mr-2 text-green-600"></i>${field.label}</label><input type="file" id="${field.name}" accept="${field.accept}" class="w-full border rounded-lg p-2"><div id="${field.name}Preview" class="mt-2"></div></div>`;
+          } else {
+            fieldsHtml += `<div class="mb-4"><label class="block font-semibold mb-2 ${field.required ? 'required-field' : ''}"><i class="fas ${field.icon} mr-2 text-green-600"></i>${field.label}</label><input type="${field.type}" id="${field.name}" class="w-full border rounded-lg p-3" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}></div>`;
+          }
+        });
+
+        const html = `
+          <div class="min-h-screen bg-gray-50 flex flex-col">
+            ${renderNavbar()}
+            <div class="flex-grow max-w-3xl mx-auto px-4 py-8">
+              <button id="backBtn" class="mb-4 text-green-700 hover:underline"><i class="fas fa-arrow-left"></i> Back</button>
+              <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div class="bg-gradient-to-r from-green-800 to-green-900 text-white px-6 py-4"><h2 class="text-xl font-bold">${typeConfig.name}</h2></div>
+                <form id="complaintForm" class="p-6">
+                  ${fieldsHtml}
+                  <div class="border-t pt-4 mt-4">
+                    <h3 class="font-semibold mb-3">Your Information</h3>
+                    <div class="grid md:grid-cols-2 gap-3 text-sm">
+                      <div><span class="text-gray-500">Name:</span> ${currentUser.fullName}</div>
+                      <div><span class="text-gray-500">Mobile:</span> ${currentUser.phone}</div>
+                      <div><span class="text-gray-500">Aadhaar:</span> ${currentUser.aadhaar}</div>
+                      <div><span class="text-gray-500">Address:</span> ${currentUser.address}</div>
+                    </div>
+                  </div>
+                  <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white py-3 rounded-lg font-bold mt-4 transition">Submit Complaint</button>
+                </form>
+              </div>
+            </div>
+            ${renderFooter()}
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        // Attach event listeners for this page
+        attachComplaintFormEvents(complaintType, typeConfig);
+      }
+
+      // ==================== EVENT ATTACHMENT FUNCTIONS ====================
+      function attachGlobalNavEvents() {
+        // Navigation buttons in navbar and footer
+        document.querySelectorAll('[data-nav="dashboard"]').forEach(btn => {
+          btn.addEventListener('click', () => navigateTo('dashboard'));
+        });
+        document.querySelectorAll('[data-nav="register"]').forEach(btn => {
+          btn.addEventListener('click', () => navigateTo('register'));
+        });
+        document.querySelectorAll('[data-nav="faq"]').forEach(btn => {
+          btn.addEventListener('click', () => navigateTo('faq'));
+        });
+        document.querySelectorAll('[data-nav="about"]').forEach(btn => {
+          btn.addEventListener('click', () => navigateTo('about'));
+        });
+        document.querySelectorAll('[data-nav="contact"]').forEach(btn => {
+          btn.addEventListener('click', () => navigateTo('contact'));
+        });
+        
+        // Logout button
+        document.getElementById('logoutNavBtn')?.addEventListener('click', () => { clearSession(); renderUserLogin(); });
+      }
+
+      function attachDashboardEvents() {
+        document.getElementById('newComplaintBtn')?.addEventListener('click', () => navigateTo('register'));
+        document.querySelectorAll('.viewBtn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id');
+            renderComplaintDetail(id);
+          });
+        });
+      }
+
+      function attachFAQEvents() {
+        document.querySelectorAll('.faq-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const answer = btn.parentElement.querySelector('.faq-answer');
+            const icon = btn.querySelector('.fa-chevron-down');
+            answer.classList.toggle('hidden');
+            icon.style.transform = answer.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+          });
+        });
+      }
+
+      function attachContactEvents() {
+        document.getElementById('contactForm')?.addEventListener('submit', (e) => {
+          e.preventDefault();
+          showToast("Message sent successfully! We'll get back to you soon.", "success");
+          e.target.reset();
+        });
+      }
+
+      function attachComplaintTypeSelectionEvents() {
+        // Back button
+        document.getElementById('backBtn')?.addEventListener('click', () => navigateTo('dashboard'));
+        
+        // Complaint type buttons
+        document.querySelectorAll('.complaintTypeBtn').forEach(btn => {
+          btn.addEventListener('click', () => renderComplaintForm(btn.getAttribute('data-type')));
+        });
+        
+        // Global navigation
+        attachGlobalNavEvents();
+      }
+
+      function attachComplaintFormEvents(complaintType, typeConfig) {
+        // Back button
+        document.getElementById('backBtn')?.addEventListener('click', () => navigateTo('register'));
+        
+        // Image preview
+        typeConfig.fields.filter(f => f.type === 'file').forEach(field => {
+          const input = document.getElementById(field.name);
+          if(input) {
+            input.addEventListener('change', (e) => {
+              const file = e.target.files[0];
+              const previewDiv = document.getElementById(`${field.name}Preview`);
+              if(file && previewDiv) {
+                const reader = new FileReader();
+                reader.onload = (event) => { previewDiv.innerHTML = `<img src="${event.target.result}" class="image-preview">`; };
+                reader.readAsDataURL(file);
+              }
+            });
+          }
+        });
+        
+        // Form submission
+        document.getElementById('complaintForm')?.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const formData = {};
+          for(const field of typeConfig.fields) {
+            const element = document.getElementById(field.name);
+            if(element) {
+              if(field.type === 'file' && element.files[0]) {
+                formData[field.name] = { fileName: element.files[0].name, fileData: await imageToBase64(element.files[0]) };
+              } else {
+                formData[field.name] = element.value;
+              }
+            }
+          }
+          
+          let title = '';
+          if(complaintType === 'bike_lost') title = `Bike Lost: ${formData.bikeRegNumber || 'Unknown'}`;
+          else if(complaintType === 'phone_lost') title = `Phone Lost: ${formData.phoneModel || 'Unknown'}`;
+          else if(complaintType === 'wallet_lost') title = `Wallet Lost: ${formData.walletType || 'Wallet'}`;
+          else if(complaintType === 'document_lost') title = `Document Lost: ${formData.documentType || 'Document'}`;
+          else if(complaintType === 'cyber_fraud') title = `Cyber Fraud: ${formData.fraudType || 'Scam'}`;
+          else title = `Complaint: ${formData.otherSubject || 'Other'}`;
+          
+          const newComplaint = {
+            id: generateComplaintId(),
+            complaintType: complaintType,
+            complaintTypeName: typeConfig.name,
+            title: title,
+            formData: formData,
+            status: "pending",
+            adminRemarks: "Complaint received. Admin will review shortly.",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            UserId: currentUser.id,
+            UserName: currentUser.fullName,
+            UserEmail: currentUser.email,
+            UserPhone: currentUser.phone,
+            UserAadhaar: currentUser.aadhaar,
+            UserAddress: currentUser.address,
+            priority: complaintType === 'cyber_fraud' || complaintType === 'bike_lost' ? 'high' : 'medium',
+            resolution: null
+          };
+          
+          addComplaint(newComplaint);
+          showToast(`Complaint ${newComplaint.id} submitted! Admin will review.`, "success");
+          navigateTo('dashboard');
+        });
+        
+        // Global navigation
+        attachGlobalNavEvents();
+      }
+
+      function renderComplaintDetail(compId) {
+        const complaints = getComplaints();
+        const complaint = complaints.find(c => c.id === compId);
+        if(!complaint) return navigateTo('dashboard');
+        
+        let formDataHtml = '';
+        if(complaint.formData) {
+          for(const [key, value] of Object.entries(complaint.formData)) {
+            if(value && typeof value === 'object' && value.fileData) {
+              formDataHtml += `<div><label class="font-semibold">${key}:</label><br><img src="${value.fileData}" class="image-preview"></div>`;
+            } else if(value) {
+              formDataHtml += `<div><label class="font-semibold">${key}:</label> ${value}</div>`;
+            }
+          }
+        }
+        
+        const html = `
+          <div class="min-h-screen bg-gray-50 flex flex-col">
+            ${renderNavbar()}
+            <div class="flex-grow max-w-3xl mx-auto px-4 py-8">
+              <button id="backBtn" class="mb-4 text-green-700 hover:underline"><i class="fas fa-arrow-left"></i> Back to Dashboard</button>
+              <div class="bg-white rounded-xl shadow-lg">
+                <div class="bg-gradient-to-r from-green-800 to-green-900 text-white px-6 py-4">
+                  <h2 class="text-xl font-bold">Complaint #${complaint.id}</h2>
+                  <span class="inline-block mt-1 px-2 py-1 rounded text-xs ${complaint.status === 'resolved' ? 'bg-green-500' : complaint.status === 'investigating' ? 'bg-orange-500' : 'bg-yellow-500'}">${complaint.status.toUpperCase()}</span>
+                </div>
+                <div class="p-6 space-y-4">
+                  <div><label class="font-bold">Title:</label><p>${complaint.title}</p></div>
+                  <div><label class="font-bold">Complaint Details:</label><div class="bg-gray-50 p-3 rounded">${formDataHtml || 'No additional details'}</div></div>
+                  <div class="bg-blue-50 p-4 rounded"><label class="font-bold text-blue-800">Admin Response:</label><p class="mt-1">${complaint.adminRemarks || 'Waiting for admin action...'}</p>${complaint.resolution ? `<p class="mt-2 text-green-700">Resolution: ${complaint.resolution}</p>` : ''}</div>
+                  <div class="text-xs text-gray-500">Filed: ${new Date(complaint.createdAt).toLocaleString()} | Updated: ${new Date(complaint.updatedAt).toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+            ${renderFooter()}
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('backBtn')?.addEventListener('click', () => navigateTo('dashboard'));
+        attachGlobalNavEvents();
+      }
+
+      // ==================== MAIN RENDER FUNCTION ====================
+      function renderUserDashboard() {
+        if(!currentUser) return renderUserLogin();
+        
+        let mainContent = '';
+        
+        if(currentPage === 'dashboard') {
+          mainContent = renderDashboardContent();
+          root.innerHTML = `
+            <div class="min-h-screen bg-gray-50 flex flex-col">
+              ${renderNavbar()}
+              <div class="flex-grow">${mainContent}</div>
+              ${renderFooter()}
+            </div>
+          `;
+          attachGlobalNavEvents();
+          attachDashboardEvents();
+        } else if(currentPage === 'faq') {
+          mainContent = renderFAQsContent();
+          root.innerHTML = `
+            <div class="min-h-screen bg-gray-50 flex flex-col">
+              ${renderNavbar()}
+              <div class="flex-grow">${mainContent}</div>
+              ${renderFooter()}
+            </div>
+          `;
+          attachGlobalNavEvents();
+          attachFAQEvents();
+        } else if(currentPage === 'about') {
+          mainContent = renderAboutUsContent();
+          root.innerHTML = `
+            <div class="min-h-screen bg-gray-50 flex flex-col">
+              ${renderNavbar()}
+              <div class="flex-grow">${mainContent}</div>
+              ${renderFooter()}
+            </div>
+          `;
+          attachGlobalNavEvents();
+        } else if(currentPage === 'contact') {
+          mainContent = renderContactUsContent();
+          root.innerHTML = `
+            <div class="min-h-screen bg-gray-50 flex flex-col">
+              ${renderNavbar()}
+              <div class="flex-grow">${mainContent}</div>
+              ${renderFooter()}
+            </div>
+          `;
+          attachGlobalNavEvents();
+          attachContactEvents();
+        } else if(currentPage === 'register') {
+          renderComplaintTypeSelection();
+        }
+      }
+
+      // ==================== LOGIN & REGISTRATION ====================
+      function renderUserLogin() {
+        const html = `
+          <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-900 via-teal-800 to-blue-900 px-4">
+            <div class="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <div class="bg-green-800 px-6 py-6 text-center">
+                <i class="fas fa-hands-helping text-5xl text-green-400 mb-2"></i>
+                <h1 class="text-2xl font-bold text-white">Online Complaint Registration Portal</h1>
+                <p class="text-green-100 text-sm">File Complaint | Track Status | Get Resolution</p>
+              </div>
+              <div class="p-8">
+                <div class="mb-4">
+                  <button id="switchToAdminBtn" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
+                    <i class="fas fa-shield-alt"></i> Admin Login →
+                  </button>
+                </div>
+                <div id="loginError" class="mb-4 text-sm text-red-600 text-center"></div>
+                <form id="loginForm">
+                  <div class="mb-4"><label class="block text-gray-700 font-semibold mb-2">Email</label><input type="email" id="loginEmail" class="w-full px-4 py-3 border rounded-lg" placeholder="user@example.com" required></div>
+                  <div class="mb-6"><label class="block text-gray-700 font-semibold mb-2">Password</label><input type="password" id="loginPassword" class="w-full px-4 py-3 border rounded-lg" placeholder="••••••••" required></div>
+                  <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 rounded-lg transition"><i class="fas fa-sign-in-alt mr-2"></i>User Login</button>
+                </form>
+                <p class="text-center text-gray-500 mt-6 text-sm">New User? <button id="registerBtn" class="text-green-700 font-semibold hover:underline">Register Here</button></p>
+                <div class="mt-5 pt-3 border-t text-center text-xs text-gray-400">Demo: User@example.com / user123</div>
+              </div>
+            </div>
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('switchToAdminBtn')?.addEventListener('click', () => renderAdminLogin());
+        document.getElementById('loginForm')?.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const email = document.getElementById('loginEmail').value.trim();
+          const pwd = document.getElementById('loginPassword').value;
+          const users = getUsers();
+          const matched = users.find(u => u.email === email && u.password === pwd && u.role === 'User');
+          if(matched) {
+            setSession(matched, 'User');
+            currentUser = matched;
+            currentPage = 'dashboard';
+            renderUserDashboard();
+          } else {
+            document.getElementById('loginError').innerText = "Invalid credentials";
+          }
+        });
+        document.getElementById('registerBtn')?.addEventListener('click', () => renderUserRegister());
+      }
+
+      function renderUserRegister() {
+        const html = `
+          <div class="min-h-screen flex items-center justify-center bg-gray-100 px-4 py-8">
+            <div class="max-w-lg w-full bg-white rounded-2xl shadow-xl">
+              <div class="bg-green-800 px-6 py-4 text-white text-center"><i class="fas fa-user-plus text-3xl"></i><h2 class="text-xl font-bold">User Registration</h2></div>
+              <div class="p-6">
+                <div class="mb-4">
+                  <button id="switchToAdminFromRegBtn" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2">
+                    <i class="fas fa-shield-alt"></i> Admin Login →
+                  </button>
+                </div>
+                <div id="regError" class="text-red-600 text-sm mb-3"></div>
+                <form id="registerForm">
+                  <div class="mb-3"><label class="required-field">Full Name</label><input type="text" id="regName" class="w-full border rounded-lg p-2" required></div>
+                  <div class="mb-3"><label class="required-field">Email</label><input type="email" id="regEmail" class="w-full border rounded-lg p-2" required></div>
+                  <div class="mb-3"><label class="required-field">Mobile Number</label><input type="tel" id="regPhone" class="w-full border rounded-lg p-2" pattern="[0-9]{10}" placeholder="10-digit mobile number" required></div>
+                  <div class="mb-3"><label class="required-field">Aadhaar Number</label><input type="text" id="regAadhaar" class="w-full border rounded-lg p-2" placeholder="12-digit Aadhaar number" required></div>
+                  <div class="mb-3"><label class="required-field">Residential Address</label><textarea id="regAddress" rows="2" class="w-full border rounded-lg p-2" placeholder="Complete address" required></textarea></div>
+                  <div class="mb-4"><label class="required-field">Password</label><input type="password" id="regPassword" class="w-full border rounded-lg p-2" required></div>
+                  <button type="submit" class="w-full bg-green-700 text-white py-2 rounded-lg font-semibold">Register as User</button>
+                </form>
+                <p class="text-center mt-4"><button id="backToLogin" class="text-green-700 underline">← Back to Login</button></p>
+              </div>
+            </div>
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('switchToAdminFromRegBtn')?.addEventListener('click', () => renderAdminLogin());
+        document.getElementById('registerForm')?.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const name = document.getElementById('regName').value.trim();
+          const email = document.getElementById('regEmail').value.trim();
+          const phone = document.getElementById('regPhone').value.trim();
+          const aadhaar = document.getElementById('regAadhaar').value.trim();
+          const address = document.getElementById('regAddress').value.trim();
+          const pwd = document.getElementById('regPassword').value;
+          
+          const users = getUsers();
+          if(users.find(u => u.email === email)) {
+            document.getElementById('regError').innerText = "Email already exists!";
+            return;
+          }
+          if(!phone.match(/^\d{10}$/)) {
+            document.getElementById('regError').innerText = "Enter valid 10-digit mobile number";
+            return;
+          }
+          if(aadhaar.replace(/\D/g,'').length < 12) {
+            document.getElementById('regError').innerText = "Enter valid Aadhaar number";
+            return;
+          }
+          
+          const newUser = { id: 'User_' + Date.now(), fullName: name, email, password: pwd, role: 'User', phone, aadhaar, address, createdAt: new Date().toISOString() };
+          users.push(newUser);
+          saveUsers(users);
+          showToast("Registration successful! Please login.", "success");
+          renderUserLogin();
+        });
+        document.getElementById('backToLogin')?.addEventListener('click', () => renderUserLogin());
+      }
+
+      // ==================== ADMIN FUNCTIONS (kept simple) ====================
+      function renderAdminLogin() {
+        const html = `
+          <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-blue-900 to-slate-900 px-4">
+            <div class="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <div class="bg-gray-800 px-6 py-6 text-center">
+                <i class="fas fa-shield-alt text-5xl text-yellow-400 mb-2"></i>
+                <h1 class="text-2xl font-bold text-white">Admin Control Panel</h1>
+              </div>
+              <div class="p-8">
+                <div id="loginError" class="mb-4 text-sm text-red-600 text-center"></div>
+                <form id="loginForm">
+                  <div class="mb-4"><label class="block text-gray-700 font-semibold mb-2">Admin Email</label><input type="email" id="adminEmail" class="w-full px-4 py-3 border rounded-lg" placeholder="admin@gov.in" required></div>
+                  <div class="mb-6"><label class="block text-gray-700 font-semibold mb-2">Password</label><input type="password" id="adminPassword" class="w-full px-4 py-3 border rounded-lg" placeholder="••••••••" required></div>
+                  <button type="submit" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-lg transition">Admin Login</button>
+                </form>
+                <div class="mt-5 text-center text-xs text-gray-400">Demo: admin@gov.in / admin123</div>
+              </div>
+            </div>
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('loginForm')?.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const email = document.getElementById('adminEmail').value.trim();
+          const pwd = document.getElementById('adminPassword').value;
+          const users = getUsers();
+          const adminUser = users.find(u => u.email === email && u.password === pwd && u.role === 'admin');
+          if(adminUser) {
+            setSession(adminUser, 'admin');
+            currentUser = adminUser;
+            renderAdminDashboard();
+          } else {
+            document.getElementById('loginError').innerText = "Invalid admin credentials";
+          }
+        });
+      }
+
+      function renderAdminDashboard() {
+        if(!currentUser || currentUser.role !== 'admin') return renderAdminLogin();
+        
+        const complaints = getComplaints();
+        const stats = {
+          total: complaints.length,
+          pending: complaints.filter(c => c.status === 'pending').length,
+          investigating: complaints.filter(c => c.status === 'investigating').length,
+          resolved: complaints.filter(c => c.status === 'resolved').length
+        };
+
+        const html = `
+          <div class="min-h-screen bg-gray-100">
+            <div class="bg-gray-800 text-white px-6 py-3 flex justify-between items-center flex-wrap gap-3">
+              <div><i class="fas fa-shield-alt mr-2"></i> Admin: ${currentUser.fullName}</div>
+              <button id="logoutBtn" class="bg-red-600 px-4 py-1 rounded text-sm hover:bg-red-700 transition">Logout</button>
+            </div>
+            <div class="max-w-7xl mx-auto px-4 py-6">
+              <div class="grid grid-cols-4 gap-4 mb-6">
+                <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-blue-600">${stats.total}</div><div>Total Complaints</div></div>
+                <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-yellow-600">${stats.pending}</div><div>Pending</div></div>
+                <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-orange-600">${stats.investigating}</div><div>Investigating</div></div>
+                <div class="bg-white p-4 rounded-xl shadow text-center"><div class="text-2xl font-bold text-green-600">${stats.resolved}</div><div>Resolved</div></div>
+              </div>
+              
+              <div class="bg-white rounded-xl shadow">
+                <div class="p-4 border-b"><h2 class="text-xl font-bold">All User Complaints</h2></div>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full">
+                    <thead class="bg-gray-100">
+                      <tr><th class="px-4 py-3">ID</th><th>User</th><th>Type</th><th>Title</th><th>Status</th><th>Priority</th><th>Filed On</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>
+                      ${complaints.map(comp => `
+                        <tr class="border-b hover:bg-gray-50">
+                          <td class="px-4 py-3 font-mono text-sm">${comp.id}</td>
+                          <td class="px-4 py-3">${comp.UserName}<br><span class="text-xs text-gray-500">${comp.UserPhone}</span></td>
+                          <td class="px-4 py-3 text-sm">${complaintTypeNames[comp.complaintType]}</td>
+                          <td class="px-4 py-3 max-w-xs truncate">${comp.title}</td>
+                          <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs ${comp.status === 'resolved' ? 'bg-green-100 text-green-700' : comp.status === 'investigating' ? 'bg-orange-100 text-orange-700' : 'bg-yellow-100 text-yellow-700'}">${comp.status}</span></td>
+                          <td class="px-4 py-3"><span class="px-2 py-1 rounded text-xs ${comp.priority === 'critical' ? 'bg-red-100' : 'bg-gray-100'}">${comp.priority}</span></td>
+                          <td class="px-4 py-3 text-xs">${new Date(comp.createdAt).toLocaleDateString()}</td>
+                          <td class="px-4 py-3"><button data-id="${comp.id}" class="respondBtn bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition">Respond</button></td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+                ${complaints.length === 0 ? '<div class="text-center py-10 text-gray-400">No complaints received yet</div>' : ''}
+              </div>
+            </div>
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('logoutBtn')?.addEventListener('click', () => { clearSession(); renderAdminLogin(); });
+        document.querySelectorAll('.respondBtn').forEach(btn => {
+          btn.addEventListener('click', () => renderAdminResponse(btn.getAttribute('data-id')));
+        });
+      }
+
+      function renderAdminResponse(compId) {
+        const complaints = getComplaints();
+        const complaint = complaints.find(c => c.id === compId);
+        if(!complaint) return renderAdminDashboard();
+        
+        const html = `
+          <div class="min-h-screen bg-gray-100 py-8 px-4">
+            <div class="max-w-4xl mx-auto">
+              <button id="backBtn" class="mb-4 text-blue-600 hover:underline"><i class="fas fa-arrow-left"></i> Back</button>
+              <div class="grid lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl shadow">
+                  <div class="bg-gray-800 text-white px-6 py-4"><h2 class="text-xl font-bold">Complaint #${complaint.id}</h2></div>
+                  <div class="p-6 space-y-3">
+                    <p><span class="font-bold">User:</span> ${complaint.UserName} (${complaint.UserPhone})</p>
+                    <p><span class="font-bold">Type:</span> ${complaintTypeNames[complaint.complaintType]}</p>
+                    <p><span class="font-bold">Title:</span> ${complaint.title}</p>
+                    <p><span class="font-bold">Description:</span> ${complaint.formData?.lostDescription || complaint.formData?.fraudDescription || complaint.formData?.incidentDescription || 'No description'}</p>
+                    <p><span class="font-bold">Current Status:</span> <span class="px-2 py-1 rounded text-xs ${complaint.status === 'resolved' ? 'bg-green-100' : 'bg-yellow-100'}">${complaint.status}</span></p>
+                  </div>
+                </div>
+                <div class="bg-white rounded-xl shadow">
+                  <div class="bg-green-800 text-white px-6 py-4"><h2 class="text-xl font-bold">Admin Response</h2></div>
+                  <div class="p-6">
+                    <form id="responseForm" class="space-y-4">
+                      <div><label class="font-semibold">Update Status</label><select id="statusSelect" class="w-full border rounded-lg p-3"><option value="pending" ${complaint.status === 'pending' ? 'selected' : ''}>Pending</option><option value="investigating" ${complaint.status === 'investigating' ? 'selected' : ''}>Investigating</option><option value="resolved" ${complaint.status === 'resolved' ? 'selected' : ''}>Resolved</option></select></div>
+                      <div><label class="font-semibold">Admin Remarks</label><textarea id="adminRemarks" rows="4" class="w-full border rounded-lg p-3" placeholder="Response to User...">${complaint.adminRemarks || ''}</textarea></div>
+                      <div id="resolutionDiv" style="display: ${complaint.status === 'resolved' ? 'block' : 'none'}"><label class="font-semibold">Resolution Summary</label><textarea id="resolution" rows="2" class="w-full border rounded-lg p-3" placeholder="How was this resolved?">${complaint.resolution || ''}</textarea></div>
+                      <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white py-3 rounded-lg font-semibold transition">Submit Response</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+        root.innerHTML = html;
+        
+        document.getElementById('backBtn')?.addEventListener('click', () => renderAdminDashboard());
+        document.getElementById('statusSelect')?.addEventListener('change', (e) => {
+          document.getElementById('resolutionDiv').style.display = e.target.value === 'resolved' ? 'block' : 'none';
+        });
+        document.getElementById('responseForm')?.addEventListener('submit', (e) => {
+          e.preventDefault();
+          updateComplaint(complaint.id, {
+            status: document.getElementById('statusSelect').value,
+            adminRemarks: document.getElementById('adminRemarks').value,
+            resolution: document.getElementById('resolution')?.value || null
+          });
+          showToast(`Response sent! User can now see the update.`, "success");
+          renderAdminDashboard();
+        });
+      }
+
+      // Start the app
+      const session = getSession();
+      if(session && session.user) {
+        currentUser = session.user;
+        currentPortal = session.portal;
+        if(currentPortal === 'User') {
+          currentPage = 'dashboard';
+          renderUserDashboard();
+        } else {
+          renderAdminDashboard();
+        }
+      } else {
+        renderUserLogin();
+      }
+    })();
+  </script>
+</body>
+</html>
