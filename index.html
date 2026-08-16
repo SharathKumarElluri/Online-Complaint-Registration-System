@@ -47,7 +47,17 @@
 </head>
 <body class="bg-gray-100">
   <div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+<script>
+const SUPABASE_URL = "https://ltubrbuihfnodnzayja.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_NjbKak43Z_MHDiImAdn-qw_b1URtQHw";
+
+const supabaseClient = supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY
+);
+</script>
   <script>
     (function(){
       // ==================== SHARED STORAGE KEYS ====================
@@ -75,12 +85,46 @@
       }
       function saveUsers(users) { localStorage.setItem(USERS_KEY, JSON.stringify(users)); }
 
-      function getComplaints() {
-        let comps = localStorage.getItem(COMPLAINTS_KEY);
-        if(!comps) { localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(getDefaultComplaints())); return getDefaultComplaints(); }
-        return JSON.parse(comps);
-      }
-      function saveComplaints(complaints) { localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(complaints)); }
+      let complaintsCache = [];
+
+function getComplaints() {
+    return complaintsCache;
+}
+
+async function loadComplaintsFromSupabase() {
+    const { data, error } = await supabaseClient
+        .from("complaints")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        console.error("Failed to load complaints:", error);
+        showToast("Could not load complaints from server.", "error");
+        return [];
+    }
+
+    complaintsCache = data.map(row => ({
+        id: row.id,
+        complaintType: row.complaint_type,
+        complaintTypeName: row.complaint_type_name,
+        title: row.title,
+        formData: row.form_data,
+        status: row.status,
+        adminRemarks: row.admin_remarks,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        UserId: row.user_id,
+        UserName: row.user_name,
+        UserEmail: row.user_email,
+        UserPhone: row.user_phone,
+        UserAadhaar: row.user_aadhaar,
+        UserAddress: row.user_address,
+        priority: row.priority,
+        resolution: row.resolution
+    }));
+
+    return complaintsCache;
+}
 
       // Session management
       let currentUser = null;
@@ -202,29 +246,61 @@
       };
 
       function generateComplaintId() {
-        const all = getComplaints();
-        const numbers = all.map(c => parseInt(c.id.replace('CMP',''))).filter(n => !isNaN(n));
-        const maxNum = numbers.length > 0 ? Math.max(...numbers) : 1000;
-        return `CMP${maxNum + 1}`;
-      }
+    return `CMP${Date.now()}`;
+}
 
-      function addComplaint(complaint) {
-        let all = getComplaints();
-        all.unshift(complaint);
-        saveComplaints(all);
-        return complaint;
-      }
+      async function addComplaint(complaint) {
+    const { error } = await supabaseClient
+        .from("complaints")
+        .insert([{
+            id: complaint.id,
+            complaint_type: complaint.complaintType,
+            complaint_type_name: complaint.complaintTypeName,
+            title: complaint.title,
+            form_data: complaint.formData,
+            status: complaint.status,
+            admin_remarks: complaint.adminRemarks,
+            created_at: complaint.createdAt,
+            updated_at: complaint.updatedAt,
+            user_id: complaint.UserId,
+            user_name: complaint.UserName,
+            user_email: complaint.UserEmail,
+            user_phone: complaint.UserPhone,
+            user_aadhaar: complaint.UserAadhaar,
+            user_address: complaint.UserAddress,
+            priority: complaint.priority,
+            resolution: complaint.resolution
+        }]);
 
-      function updateComplaint(complaintId, updates) {
-        let all = getComplaints();
-        const index = all.findIndex(c => c.id === complaintId);
-        if(index !== -1) {
-          all[index] = { ...all[index], ...updates, updatedAt: new Date().toISOString() };
-          saveComplaints(all);
-          return true;
-        }
-        return false;
-      }
+    if (error) {
+        console.error("Failed to save complaint:", error);
+        throw error;
+    }
+
+    complaintsCache.unshift(complaint);
+    return complaint;
+}
+
+      async function updateComplaint(complaintId, updates) {
+    const { error } = await supabaseClient
+        .from("complaints")
+        .update({
+            status: updates.status,
+            admin_remarks: updates.adminRemarks,
+            resolution: updates.resolution,
+            updated_at: new Date().toISOString()
+        })
+        .eq("id", complaintId);
+
+    if (error) {
+        console.error("Failed to update complaint:", error);
+        throw error;
+    }
+
+    await loadComplaintsFromSupabase();
+
+    return true;
+}
 
       function imageToBase64(file) {
         return new Promise((resolve, reject) => {
@@ -688,9 +764,21 @@
             resolution: null
           };
           
-          addComplaint(newComplaint);
-          showToast(`Complaint ${newComplaint.id} submitted! Admin will review.`, "success");
-          navigateTo('dashboard');
+          try {
+    await addComplaint(newComplaint);
+
+    showToast(
+        `Complaint ${newComplaint.id} submitted! Admin will review.`,
+        "success"
+    );
+
+    await loadComplaintsFromSupabase();
+    navigateTo('dashboard');
+
+} catch (error) {
+    console.error(error);
+    showToast("Failed to submit complaint. Please try again.", "error");
+}
         });
         
         // Global navigation
@@ -741,10 +829,12 @@
       }
 
       // ==================== MAIN RENDER FUNCTION ====================
-      function renderUserDashboard() {
-        if(!currentUser) return renderUserLogin();
-        
-        let mainContent = '';
+      async function renderUserDashboard() {
+    if(!currentUser) return renderUserLogin();
+
+    await loadComplaintsFromSupabase();
+
+    let mainContent = '';
         
         if(currentPage === 'dashboard') {
           mainContent = renderDashboardContent();
@@ -943,10 +1033,14 @@
         });
       }
 
-      function renderAdminDashboard() {
-        if(!currentUser || currentUser.role !== 'admin') return renderAdminLogin();
-        
-        const complaints = getComplaints();
+      async function renderAdminDashboard() {
+    if(!currentUser || currentUser.role !== 'admin') {
+        return renderAdminLogin();
+    }
+
+    await loadComplaintsFromSupabase();
+
+    const complaints = getComplaints();
         const stats = {
           total: complaints.length,
           pending: complaints.filter(c => c.status === 'pending').length,
@@ -1045,16 +1139,34 @@
         document.getElementById('statusSelect')?.addEventListener('change', (e) => {
           document.getElementById('resolutionDiv').style.display = e.target.value === 'resolved' ? 'block' : 'none';
         });
-        document.getElementById('responseForm')?.addEventListener('submit', (e) => {
-          e.preventDefault();
-          updateComplaint(complaint.id, {
-            status: document.getElementById('statusSelect').value,
-            adminRemarks: document.getElementById('adminRemarks').value,
-            resolution: document.getElementById('resolution')?.value || null
-          });
-          showToast(`Response sent! User can now see the update.`, "success");
-          renderAdminDashboard();
-        });
+       document.getElementById('responseForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const updates = {
+        status: document.getElementById('statusSelect').value,
+        adminRemarks: document.getElementById('adminRemarks').value,
+        resolution: document.getElementById('resolution')?.value || null
+    };
+
+    try {
+        await updateComplaint(complaint.id, updates);
+
+        showToast(
+            "Response sent! User can now see the update.",
+            "success"
+        );
+
+        await renderAdminDashboard();
+
+    } catch (error) {
+        console.error(error);
+
+        showToast(
+            "Failed to update complaint.",
+            "error"
+        );
+    }
+});
       }
 
       // Start the app
