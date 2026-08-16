@@ -50,7 +50,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
-const SUPABASE_URL = "https://ltubrbbuihfnodnzayja.supabase.co/rest/v1/";
+const SUPABASE_URL = "https://ltubrbbuihfnodnzayja.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_NjbKak43Z_MHDiImAdn-qw_b1URtQHw";
 
 const supabaseClient = supabase.createClient(
@@ -104,7 +104,7 @@ async function loadComplaintsFromSupabase() {
     }
 
     complaintsCache = data.map(row => ({
-        id: row.id,
+        id: row.complaint_id,
         complaintType: row.complaint_type,
         complaintTypeName: row.complaint_type_name,
         title: row.title,
@@ -249,11 +249,11 @@ async function loadComplaintsFromSupabase() {
     return `CMP${Date.now()}`;
 }
 
-      async function addComplaint(complaint) {
+    async function addComplaint(complaint) {
     const { error } = await supabaseClient
         .from("complaints")
         .insert([{
-            id: complaint.id,
+            complaint_id: complaint.id,
             complaint_type: complaint.complaintType,
             complaint_type_name: complaint.complaintTypeName,
             title: complaint.title,
@@ -270,16 +270,26 @@ async function loadComplaintsFromSupabase() {
             user_address: complaint.UserAddress,
             priority: complaint.priority,
             resolution: complaint.resolution
-        }]);
+        }]
+    );
 
     if (error) {
-        console.error("Failed to save complaint:", error);
+        console.error("SUPABASE ERROR:", error);
+
+        alert(
+            "Supabase Error\n\n" +
+            "Message: " + (error.message || "") + "\n" +
+            "Code: " + (error.code || "") + "\n" +
+            "Details: " + (error.details || "") + "\n" +
+            "Hint: " + (error.hint || "")
+        );
+
         throw error;
     }
 
     complaintsCache.unshift(complaint);
     return complaint;
-}
+}  
 
       async function updateComplaint(complaintId, updates) {
     const { error } = await supabaseClient
@@ -290,10 +300,19 @@ async function loadComplaintsFromSupabase() {
             resolution: updates.resolution,
             updated_at: new Date().toISOString()
         })
-        .eq("id", complaintId);
+        .eq("complaint_id", complaintId);
 
     if (error) {
-        console.error("Failed to update complaint:", error);
+        console.error("SUPABASE UPDATE ERROR:", error);
+
+        alert(
+            "Supabase Update Error\n\n" +
+            "Message: " + (error.message || "") + "\n" +
+            "Code: " + (error.code || "") + "\n" +
+            "Details: " + (error.details || "") + "\n" +
+            "Hint: " + (error.hint || "")
+        );
+
         throw error;
     }
 
